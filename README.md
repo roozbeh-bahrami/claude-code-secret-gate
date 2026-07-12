@@ -1,8 +1,8 @@
-# git-secret-gate 🔒
+# claude-code-secret-gate 🔒
 
-**Abort any commit that contains secrets — before it becomes permanent history.**
+**Your AI coding agent commits fast and often. This is the mechanical gate that stops it from committing secrets — before they become permanent history.**
 
-One shell script, zero dependencies. It scans what you've *staged* (the exact content about to enter git) and blocks the commit if it finds:
+Built for Claude Code and any AI-agent workflow; works in any plain git repo too. One shell script, zero dependencies. It scans what's *staged* (the exact content about to enter git) and blocks the commit if it finds:
 
 - 🔑 Secret-shaped strings **inside file content**: JWTs, private key blocks, AWS keys, GitHub/Slack/OpenAI/Stripe-style tokens, GoHighLevel PITs
 - 📄 Credential-looking **filenames**: `.env`, `.pem`, `id_rsa`, `credentials*.json`…
@@ -47,7 +47,7 @@ Patterns live in one variable (`PATTERNS`) — add your platform's token shapes.
 
 ## Author
 
-**Roozbeh Bahrami** — AI automation specialist. Part of my verification-first toolkit, together with [claude-advisor-skill](https://github.com/roozbeh-bahrami/claude-advisor-skill). ⭐ if it saved your history.
+**Roozbeh Bahrami** — AI automation specialist. Part of my verification-first toolkit, together with [claude-code-advisor](https://github.com/roozbeh-bahrami/claude-code-advisor) and [claude-code-brain](https://github.com/roozbeh-bahrami/claude-code-brain). ⭐ if it saved your history.
 
 ## License
 
