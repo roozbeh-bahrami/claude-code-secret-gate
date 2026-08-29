@@ -9,7 +9,14 @@ set -euo pipefail
 FAIL=0
 
 # ---- 1. Dangerous FILENAMES staged? ----------------------------------------
-BAD_NAMES=$(git diff --cached --name-only | grep -E '(^|/)\.env$|(^|/)\.env\.[^.]+$|\.pem$|\.p12$|(^|/)id_rsa|credentials.*\.json$' || true)
+# .example / .template / .sample are TEMPLATES — they exist to be committed, and a project's
+# .gitignore usually un-ignores them explicitly (`!.env.example`). Blocking them is a false
+# positive on the one file that is meant to be shared. Content scanning still covers them, so a
+# real token pasted into an .env.example is still caught by section 2.
+# MEASURED 2026-08-29: this rule failed a CI run on a template holding `pit-xxxx` placeholders.
+BAD_NAMES=$(git diff --cached --name-only \
+  | grep -vE '\.(example|template|sample|dist)$' \
+  | grep -E '(^|/)\.env$|(^|/)\.env\.[^.]+$|\.pem$|\.p12$|(^|/)id_rsa|credentials.*\.json$' || true)
 if [ -n "$BAD_NAMES" ]; then
   echo "🚨 SECRET-GATE: credential-looking FILES staged:"
   echo "$BAD_NAMES" | sed 's/^/   /'
@@ -19,7 +26,15 @@ fi
 # ---- 2. Secret PATTERNS inside staged content? ------------------------------
 # JWTs, private keys, AWS keys, GitHub/Slack/OpenAI/Stripe tokens, GHL PITs.
 PATTERNS='eyJhbGciOi|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|xox[bapsr]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{20,}|pit-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}'
-HITS=$(git diff --cached -U0 | grep -E '^\+' | grep -EIn "$PATTERNS" | head -10 || true)
+# A line that is a DETECTOR is not a leak. A secret gate, a CI workflow and a .gitignore all have
+# to contain the very shapes they look for, and blocking them is a false positive that teaches
+# people to reach for --no-verify — which is the one habit this tool exists to prevent.
+# The test is exact, not a filename exemption: a line carrying an ALTERNATION of two or more
+# different secret families (a `|` between them) is a pattern, because no real token contains one.
+# MEASURED 2026-08-29: this gate blocked the commit that added its own CI workflow.
+IS_DETECTOR='eyJhbGciOi\|-----BEGIN|PRIVATE KEY\|AKIA|AKIA\[0-9A-Z\]|ghp_\[A-Za-z0-9\]|xox\[bapsr\]|PATTERNS=|--exclude|:\(exclude\)'
+HITS=$(git diff --cached -U0 | grep -E '^\+' | grep -EIn "$PATTERNS" \
+       | grep -vE "$IS_DETECTOR" | head -10 || true)
 if [ -n "$HITS" ]; then
   echo "🚨 SECRET-GATE: secret-shaped strings in staged content (showing max 10, values truncated):"
   echo "$HITS" | cut -c1-60 | sed 's/^/   /'
