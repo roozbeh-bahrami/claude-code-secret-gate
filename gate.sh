@@ -25,14 +25,33 @@ fi
 
 # ---- 2. Secret PATTERNS inside staged content? ------------------------------
 # JWTs, private keys, AWS keys, GitHub/Slack/OpenAI/Stripe tokens, GHL PITs.
-PATTERNS='eyJhbGciOi|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|xox[bapsr]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{20,}|pit-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}'
+# THE `sk` ARM: A KEY HAS ITS ENTROPY IN ONE UNBROKEN RUN; A CSS CUSTOM PROPERTY IS WORDS JOINED
+# BY HYPHENS. `sk-[A-Za-z0-9_-]{20,}` counted the hyphens, so `--sk-link-disabled-opacity: 0.42`
+# and `--sk-headline-plus-first-element-margin` matched and a design system read as leaked keys.
+# MEASURED 2026-08-29: this gate blocked the very commit that fixed the identical bug in
+# web-studio/scripts/v3/secret-gate.js. A scanner that cries wolf on design tokens is worse than
+# one pattern narrower, because it teaches people to reach for --no-verify.
+#   FIX: the tail must contain a run of 16+ alphanumerics with NO separator inside it, and the
+#   left side is anchored so `sk` inside `ask_`/`risk_`/`task_` cannot start a match. Both
+#   separators are covered now — the old arm required a literal hyphen and so never saw a Stripe
+#   `sk_live_` key at all. Every vendor still matches: stripe sk_live_ + 24, openai sk-proj- + 48,
+#   anthropic sk-ant-api03- + 95. Fixtures in gate.test.sh; run it after any change here.
+PATTERNS='eyJhbGciOi|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|xox[bapsr]-[A-Za-z0-9-]{10,}|(^|[^A-Za-z0-9_])sk[-_][A-Za-z0-9][A-Za-z0-9_-]*[A-Za-z0-9]{16,}|pit-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}'
 # A line that is a DETECTOR is not a leak. A secret gate, a CI workflow and a .gitignore all have
 # to contain the very shapes they look for, and blocking them is a false positive that teaches
 # people to reach for --no-verify — which is the one habit this tool exists to prevent.
 # The test is exact, not a filename exemption: a line carrying an ALTERNATION of two or more
 # different secret families (a `|` between them) is a pattern, because no real token contains one.
 # MEASURED 2026-08-29: this gate blocked the commit that added its own CI workflow.
-IS_DETECTOR='eyJhbGciOi\|-----BEGIN|PRIVATE KEY\|AKIA|AKIA\[0-9A-Z\]|ghp_\[A-Za-z0-9\]|xox\[bapsr\]|PATTERNS=|--exclude|:\(exclude\)'
+# A FIXTURE IS NOT A LEAK EITHER. gate.test.sh has to contain real key SHAPES or it proves
+# nothing, and this gate would block the file that proves this gate works. The exemption is
+# structural, not a filename allowance and not a magic "allow" comment anyone can paste onto a
+# real key: the line's first token must be the fixture helper `t MATCH` / `t NOMATCH`. A leaked
+# credential is not preceded by a test-runner call.
+# The second arm of the same idea: a line that WRITES its fake key into "$PROBE_SECRET" is a
+# planted probe (GENERAL/scripts/prove-commit-gates.sh, which proves this gate fires in every
+# repo). A real leak is not redirected into a variable named PROBE_SECRET.
+IS_DETECTOR='eyJhbGciOi\|-----BEGIN|PRIVATE KEY\|AKIA|AKIA\[0-9A-Z\]|ghp_\[A-Za-z0-9\]|xox\[bapsr\]|PATTERNS=|--exclude|:\(exclude\)|^[0-9]+:\+t (MATCH|NOMATCH) |[$]PROBE_SECRET'
 HITS=$(git diff --cached -U0 | grep -E '^\+' | grep -EIn "$PATTERNS" \
        | grep -vE "$IS_DETECTOR" | head -10 || true)
 if [ -n "$HITS" ]; then
