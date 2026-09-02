@@ -14,7 +14,13 @@ FAIL=0
 # positive on the one file that is meant to be shared. Content scanning still covers them, so a
 # real token pasted into an .env.example is still caught by section 2.
 # MEASURED 2026-08-29: this rule failed a CI run on a template holding `pit-xxxx` placeholders.
-BAD_NAMES=$(git diff --cached --name-only \
+# -c core.quotePath=false, ALWAYS. MEASURED 2026-09-02 by an adversarial check of the MB
+# pre-commit hook that calls this file: by default git C-QUOTES a path containing any non-ASCII
+# byte, so `dossier-é/.env` arrives as `"dossier-\303\251/.env"` and the anchored `(^|/)\.env$`
+# cannot match a name that ends in a quote. A credential file under a directory with an accent in
+# it was reported clean. Every macOS screenshot filename contains U+202F, so this needed no
+# exotic input. quotePath=false makes git print the real bytes; the greps then see the real name.
+BAD_NAMES=$(git -c core.quotePath=false diff --cached --name-only \
   | grep -vE '\.(example|template|sample|dist)$' \
   | grep -E '(^|/)\.env$|(^|/)\.env\.[^.]+$|\.pem$|\.p12$|(^|/)id_rsa|credentials.*\.json$' || true)
 if [ -n "$BAD_NAMES" ]; then
