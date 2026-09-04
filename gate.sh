@@ -20,7 +20,16 @@ FAIL=0
 # cannot match a name that ends in a quote. A credential file under a directory with an accent in
 # it was reported clean. Every macOS screenshot filename contains U+202F, so this needed no
 # exotic input. quotePath=false makes git print the real bytes; the greps then see the real name.
-BAD_NAMES=$(git -c core.quotePath=false diff --cached --name-only \
+# FAIL CLOSED. MEASURED 2026-09-04, empirically, by putting a `git` on PATH that exits 1 with a
+# real AKIA key staged: this gate printed "staged content clean" and exited 0. The leak would have
+# committed. `set -euo pipefail` is on line 7 and does NOTHING here, because a pipeline ending in
+# `|| true` is an OR-list and errexit never fires on one — so a scanner that CANNOT RUN was
+# indistinguishable from a scan that found nothing. Confirmed independently by reviewer-Codex.
+# The distinction that matters: grep exiting 1 means NO MATCH and is normal; git failing, or grep
+# exiting >=2, means THE SCAN DID NOT HAPPEN and must block. Never merge those two into `|| true`.
+STAGED_NAMES=$(git -c core.quotePath=false diff --cached --name-only) || {
+  echo "🚨 SECRET-GATE: could not list staged files — git failed. FAILING CLOSED."; exit 1; }
+BAD_NAMES=$(printf '%s\n' "$STAGED_NAMES" \
   | grep -vE '\.(example|template|sample|dist)$' \
   | grep -E '(^|/)\.env$|(^|/)\.env\.[^.]+$|\.pem$|\.p12$|(^|/)id_rsa|credentials.*\.json$' || true)
 if [ -n "$BAD_NAMES" ]; then
@@ -58,8 +67,17 @@ PATTERNS='eyJhbGciOi|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|AKIA[0-9A-Z]{16}
 # planted probe (GENERAL/scripts/prove-commit-gates.sh, which proves this gate fires in every
 # repo). A real leak is not redirected into a variable named PROBE_SECRET.
 IS_DETECTOR='eyJhbGciOi\|-----BEGIN|PRIVATE KEY\|AKIA|AKIA\[0-9A-Z\]|ghp_\[A-Za-z0-9\]|xox\[bapsr\]|PATTERNS=|--exclude|:\(exclude\)|^[0-9]+:\+t (MATCH|NOMATCH) |[$]PROBE_SECRET'
-HITS=$(git diff --cached -U0 | grep -E '^\+' | grep -EIn "$PATTERNS" \
+# FAIL CLOSED — same rule as section 1. The staged diff is captured on its own so a git failure
+# is a BLOCK, not an empty result that reads as clean.
+STAGED_DIFF=$(git diff --cached -U0) || {
+  echo "🚨 SECRET-GATE: could not read the staged diff — git failed. FAILING CLOSED."; exit 1; }
+HITS=$(printf '%s\n' "$STAGED_DIFF" | grep -E '^\+' | grep -EIn "$PATTERNS" \
        | grep -vE "$IS_DETECTOR" | head -10 || true)
+# A grep that ERRORS (exit >=2: bad pattern, unreadable input) is not a grep that found nothing.
+GREP_RC=${PIPESTATUS[2]:-0}
+if [ "${GREP_RC:-0}" -ge 2 ]; then
+  echo "🚨 SECRET-GATE: the content scanner errored (grep exit $GREP_RC). FAILING CLOSED."; exit 1
+fi
 if [ -n "$HITS" ]; then
   echo "🚨 SECRET-GATE: secret-shaped strings in staged content (showing max 10, values truncated):"
   echo "$HITS" | cut -c1-60 | sed 's/^/   /'

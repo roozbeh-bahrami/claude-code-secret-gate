@@ -54,6 +54,36 @@ t NOMATCH 'sk-  (the prefix on its own, discussed in prose)'     'prose about th
 t NOMATCH '# TODO: put the api key in .env, never in the repo'   'prose about keys'
 t NOMATCH 'It needs a Worker deploy, two KV namespace ids and three secrets.' 'prose about secrets'
 
+# ── FAIL-CLOSED: A SCANNER THAT CANNOT RUN IS NOT A CLEAN SCAN ────────────────────────────────
+# MEASURED 2026-09-04, empirically: with a real AKIA key staged and a `git` on PATH that exits 1,
+# this gate printed "staged content clean" and exited 0 — the leak would have committed. `set -euo
+# pipefail` is on line 7 and did nothing, because a pipeline ending in `|| true` is an OR-list and
+# errexit never fires on one. Confirmed independently by reviewer-Codex. These three cases are the
+# calibration: the middle one is the defect, and it must stay red if anyone reintroduces `|| true`.
+echo "── fail-closed (the scanner itself) ──────────────────────────────────────"
+G_SH="$(cd "$(dirname "$0")" && pwd)/gate.sh"
+SB=$(mktemp -d); ( cd "$SB" && git init -q . && git config user.email t@t && git config user.name t
+  # The key is ASSEMBLED, never written literally. This gate BLOCKED the commit adding this very
+  # file when the fixture held the whole string — correctly: a literal AKIA run in a staged diff is
+  # a leak by every test it applies. The right fix is a fixture that does not look like a leak, not
+  # a wider exemption; widening the detector to admit your own tests is how a gate stops working.
+  printf 'AKIA%s\n' '1234567890ABCDEF' > leak.txt && git add leak.txt ) >/dev/null 2>&1
+mkdir -p "$SB/stub"; printf '#!/bin/sh\nexit 1\n' > "$SB/stub/git"; chmod +x "$SB/stub/git"
+
+( cd "$SB" && bash "$G_SH" >/dev/null 2>&1 ); rc=$?
+if [ "$rc" -eq 1 ]; then P=$((P+1)); echo "  ok      a staged secret BLOCKS (exit 1)"
+else F=$((F+1)); echo "  FAIL    a staged secret did not block (exit $rc)"; fi
+
+( cd "$SB" && PATH="$SB/stub:$PATH" bash "$G_SH" >/dev/null 2>&1 ); rc=$?
+if [ "$rc" -eq 1 ]; then P=$((P+1)); echo "  ok      a scanner that CANNOT RUN blocks (exit 1) — fails closed"
+else F=$((F+1)); echo "  FAIL    FAIL-OPEN: scanner could not run and the gate passed (exit $rc)"; fi
+
+( cd "$SB" && git rm -q --cached leak.txt >/dev/null 2>&1; rm -f leak.txt
+  printf 'hello\n' > ok.txt && git add ok.txt && bash "$G_SH" >/dev/null 2>&1 ); rc=$?
+if [ "$rc" -eq 0 ]; then P=$((P+1)); echo "  ok      a genuinely clean tree still PASSES (no false positive)"
+else F=$((F+1)); echo "  FAIL    clean tree blocked (exit $rc) — the fix over-blocks"; fi
+rm -rf "$SB"
+
 echo "──────────────────────────────────────────────────────────────────────────"
 echo "  $P passed, $F failed, of $((P+F))"
 [ "$F" -eq 0 ] || exit 1
