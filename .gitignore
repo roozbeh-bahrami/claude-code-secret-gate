@@ -1,1 +1,30 @@
 .DS_Store
+
+# ── FP-092 ROOT SECRET/IMAGE BLOCK — installed 2026-09-05 (master plan PART II §9) ──────────────
+# A screenshot of an API key is the one secret that walks past every gate we have. The secret gate
+# greps TEXT; a PNG has none. The block below is UNCONDITIONAL and ROOT-ONLY (the leading `/`), so
+# it stops the repo-root drop zone without touching images a project legitimately tracks in
+# subdirectories. Removing a line here re-opens FP-092 — `system-coverage.py` fails the repo if the
+# block disappears, and `guards-local.sh` checks every repo on the machine.
+/Screenshot*
+/screenshot*
+/Screen?Shot*
+/*.heic
+/*.HEIC
+/*.heif
+/*.HEIF
+/secrets*
+/Secrets*
+/keys*
+/Keys*
+/*.pem
+/*.p12
+/*.pfx
+/*.key
+/id_rsa
+/id_rsa.*
+/id_ed25519
+/id_ed25519.*
+/*.mobileprovision
+/*.p8
+# ── end FP-092 block ────────────────────────────────────────────────────────────────────────────

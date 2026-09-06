@@ -1,0 +1,72 @@
+# gate.yml — the fixture suite, run on every push and pull request.
+#
+# WHY THIS EXISTS. MASTER-PLAN PART II §7: "Add a fixture-backed CI workflow to
+# `claude-code-secret-gate`." Before 2026-09-06 this repository had no `.github/` directory at all,
+# so `gh run list` returned an empty array — which §13's done-test recorded as a result that "can
+# neither pass nor fail". There were no runs because there was no workflow.
+#
+# WHAT IT GRADES, and why a fixture suite rather than a lint. `gate.sh` is the pre-commit secret
+# scanner installed across all fifteen repositories on this machine. Its failure mode is not a
+# crash — it is a QUIET PASS: a scanner that cannot run, or whose patterns will not parse, once
+# reported "clean". `gate.test.sh` plants real staged secrets and real broken scanners and requires
+# exit 1 for each. That is the only thing worth running here.
+#
+# FAIL-CLOSED, IN CI AS ON DISK. `set -euo pipefail` plus an explicit assertion that the suite
+# actually graded something: a suite that discovers zero cases prints "0 passed, 0 failed", exits 0,
+# and reads as a quiet green. Zero is a broken run, never a clean one — the same rule the estate's
+# other runners carry.
+name: gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fixtures:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: git identity — the fixtures commit into throwaway repositories
+        run: |
+          git config --global user.email "gate-fixture@example.invalid"
+          git config --global user.name  "gate fixture"
+          git config --global init.defaultBranch main
+
+      - name: THE FIXTURE SUITE — planted secrets must BLOCK, and a broken scanner must BLOCK TOO
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash gate.test.sh | tee /tmp/gate-test.out
+          # ZERO GRADED IS A FAILURE, NOT A CLEAN RUN. A suite whose discovery breaks prints
+          # "0 passed, 0 failed", exits 0, and looks exactly like success.
+          line=$(grep -E '^[[:space:]]*[0-9]+ passed, [0-9]+ failed' /tmp/gate-test.out | tail -1)
+          [ -n "$line" ] || { echo "::error::the suite printed no result line — it did not run"; exit 1; }
+          passed=$(echo "$line" | grep -oE '^[[:space:]]*[0-9]+' | tr -d ' ')
+          [ "$passed" -gt 0 ] || { echo "::error::zero cases graded — a broken suite, not a clean one"; exit 1; }
+          echo "graded $passed case(s)"
+
+      - name: THE GATE IS EXECUTABLE — an unexecutable gate is a gate that never runs
+        run: |
+          test -x gate.sh || { echo "::error::gate.sh is not executable"; exit 1; }
+
+      - name: THE FP-092 ROOT BLOCK — a screenshot of a key must not be committable
+        run: |
+          # The secret gate greps TEXT. A PNG has none, so a screenshot of an API key is the one
+          # secret that walks past it, and the root ignore block is the only thing that stops it.
+          git check-ignore -q "Screenshot 2026-01-01 at 00.00.00.png" \
+            || { echo "::error::the FP-092 root block is missing from .gitignore"; exit 1; }
+
+      - name: What this workflow does NOT prove
+        if: always()
+        run: |
+          echo "NOT CHECKED HERE:"
+          echo "  - whether a secret-shaped string is a LIVE credential (no provider is contacted)"
+          echo "  - that the gate is INSTALLED in the fifteen repositories on the operator's machine"
+          echo "    (a runner sees this checkout only; GENERAL/scripts/prove-commit-gates.sh does that)"
+          echo "  - full git history (this grades the fixtures, not the past)"
